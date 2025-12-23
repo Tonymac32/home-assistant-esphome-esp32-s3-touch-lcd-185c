@@ -1,0 +1,67 @@
+services:
+  homeassistant:
+    container_name: homeassistant
+    image: "ghcr.io/home-assistant/home-assistant:stable"
+    volumes:
+      - ./config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    environment:
+      TZ: Europe/Amsterdam
+    # Mapping the DRI (Direct Rendering Infrastructure) devices is essential for AMD
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd  # Required for ROCm/OpenCL compute workloads
+    # Ensure the container user has permissions to access the graphics hardware
+    group_add:
+      - "44"
+      - "993"
+    # Optional: some containers require specific security options for hardware access
+    security_opt:
+      - seccomp=unconfined
+  # Voice: Speech-to-Text
+
+# --- VOICE SERVICES (AMD GPU ACCELERATED) ---
+  whisper:
+    container_name: whisper
+    image: rhasspy/wyoming-whisper:latest
+    restart: unless-stopped
+    command: --model small --language en
+    volumes:
+      - ./whisper-data:/data
+    ports:
+      - "10300:10300"
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "44"
+      - "993"
+
+  piper:
+    container_name: piper
+    image: rhasspy/wyoming-piper:latest
+    restart: unless-stopped
+    command: --voice en_US-lessac-medium
+    volumes:
+      - ./piper-data:/data
+    ports:
+      - "10200:10200"
+
+  openwakeword:
+    container_name: openwakeword
+    image: rhasspy/wyoming-openwakeword:latest
+    restart: unless-stopped
+    ports:
+      - "10400:10400"
+
+  esphome:
+    container_name: esphome
+    image: ghcr.io/esphome/esphome:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./esphome-config:/config
+      - /etc/localtime:/etc/localtime:ro

@@ -1,0 +1,866 @@
+# Waveshare ESP32-S3-Touch-LCD-1.85C - Full Configuration
+# With Voice Assistant, Touch, LVGL UI, and Wake Word
+
+substitutions:
+  wake_word_phrase: !secret wake_word_phrase
+
+esphome:
+  name: esp32-s3-touch-lcd-185
+  friendly_name: ESP32-S3 Touch LCD 1.85
+  on_boot:
+    priority: -100
+    then:
+      - delay: 5s
+      - if:
+          condition:
+            lambda: 'return !id(is_muted);'
+          then:
+            - logger.log: "Starting wake word on boot"
+            - voice_assistant.start_continuous:
+
+# Global variables
+globals:
+  - id: is_muted
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: display_on
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+  - id: ignore_touch
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+  services:
+    # Update weather display (called from HA automation)
+    - service: set_weather
+      variables:
+        temperature: string
+        condition: string
+      then:
+        - lvgl.label.update:
+            id: lbl_weather_temp
+            text: !lambda 'return temperature.c_str();'
+        - lvgl.label.update:
+            id: lbl_weather_cond
+            text: !lambda 'return condition.c_str();'
+
+# OTA updates
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# WiFi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: 'ESP32-S3-Touch-LCD-185'
+    password: !secret ap_password
+
+captive_portal:
+
+# Time from Home Assistant
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      then:
+        - logger.log: "Time synced from Home Assistant"
+    on_time:
+      # Update time display every minute
+      - seconds: 0
+        then:
+          - lvgl.label.update:
+              id: lbl_time
+              text: !lambda |-
+                auto time = id(ha_time).now();
+                return time.strftime("%H:%M");
+          - lvgl.label.update:
+              id: lbl_date
+              text: !lambda |-
+                auto time = id(ha_time).now();
+                return time.strftime("%a %d %b");
+
+# ESP32-S3 configuration
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+
+# PSRAM configuration - CRITICAL for display
+psram:
+  mode: octal
+  speed: 80MHz
+
+# Web server
+web_server:
+  port: 80
+  version: 2
+  include_internal: true
+
+# I2S Audio Configuration for Microphone and Speaker
+i2s_audio:
+  - id: i2s_in
+    i2s_lrclk_pin: GPIO2
+    i2s_bclk_pin: GPIO15
+  - id: i2s_out
+    i2s_lrclk_pin: GPIO38
+    i2s_bclk_pin: GPIO48
+
+# Speaker configuration
+speaker:
+  - platform: i2s_audio
+    id: i2s_speaker
+    i2s_audio_id: i2s_out
+    i2s_dout_pin: GPIO47
+    dac_type: external
+    i2s_mode: primary
+
+# Microphone configuration
+microphone:
+  - platform: i2s_audio
+    id: i2s_microphone
+    i2s_audio_id: i2s_in
+    i2s_din_pin: GPIO39
+    adc_type: external
+    pdm: false
+    channel: right
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+# Media Player - CURRENTLY NOT SUPPORTED WITH ESP-IDF FRAMEWORK
+# The i2s_audio media_player requires Arduino framework, but this display
+# requires ESP-IDF for PSRAM/LVGL support. Uncomment below if/when ESPHome
+# adds ESP-IDF support for media_player:
+#
+# media_player:
+#   - platform: i2s_audio
+#     id: esp_media_player
+#     name: Media Player
+#     i2s_audio_id: i2s_out
+#     i2s_dout_pin: GPIO47
+#     dac_type: external
+#     mode: mono
+
+# Voice Assistant configuration
+# Wake word + push-to-talk both enabled
+voice_assistant:
+  id: va
+  microphone: i2s_microphone
+  speaker: i2s_speaker
+  use_wake_word: true
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_wake_word_detected:
+    - light.turn_on:
+        id: display_backlight
+        brightness: 100%
+    - lvgl.resume:
+  on_listening:
+    - light.turn_on:
+        id: display_backlight
+        brightness: 100%
+    - lvgl.resume:
+    - lvgl.label.update:
+        id: lbl_status
+        text: "Listening..."
+        text_color: 0x00FF00
+    # Show green spinning ring
+    - lvgl.spinner.update:
+        id: voice_ring
+        arc_color: 0x003300
+        indicator:
+          arc_color: 0x00FF00
+    - lvgl.widget.show: voice_ring
+  on_stt_end:
+    - lvgl.label.update:
+        id: lbl_status
+        text: "Processing..."
+        text_color: 0xFFFF00
+    # Change ring to orange/yellow
+    - lvgl.spinner.update:
+        id: voice_ring
+        arc_color: 0x332200
+        indicator:
+          arc_color: 0xFF6600
+  on_tts_end:
+    - light.turn_on:
+        id: display_backlight
+        brightness: 30%
+    # Hide the ring
+    - lvgl.widget.hide: voice_ring
+    - if:
+        condition:
+          lambda: 'return id(is_muted);'
+        then:
+          - lvgl.label.update:
+              id: lbl_status
+              text: "Muted"
+              text_color: 0xFF6600
+        else:
+          - lvgl.label.update:
+              id: lbl_status
+              text: "Ready"
+              text_color: 0xFFFFFF
+          - delay: 1s
+          - voice_assistant.start_continuous:
+  on_end:
+    # Hide the ring
+    - lvgl.widget.hide: voice_ring
+    - if:
+        condition:
+          lambda: 'return !id(is_muted);'
+        then:
+          - delay: 1s
+          - voice_assistant.start_continuous:
+  on_error:
+    # Show red ring briefly then hide
+    - lvgl.spinner.update:
+        id: voice_ring
+        arc_color: 0x330000
+        indicator:
+          arc_color: 0xFF0000
+    - lvgl.widget.show: voice_ring
+    - delay: 2s
+    - lvgl.widget.hide: voice_ring
+    - if:
+        condition:
+          lambda: 'return id(is_muted);'
+        then:
+          - lvgl.label.update:
+              id: lbl_status
+              text: "Muted"
+              text_color: 0xFF6600
+        else:
+          - lvgl.label.update:
+              id: lbl_status
+              text: "Ready"
+              text_color: 0xFFFFFF
+          - voice_assistant.start_continuous:
+  on_client_connected:
+    - lvgl.label.update:
+        id: lbl_status
+        text: "Connected"
+        text_color: 0x00FF00
+
+# Binary sensors (buttons)
+# Note: Top physical button = GPIO0, Bottom physical button = Hardware Reset (EN pin)
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      inverted: true
+    name: 'Side Button'
+    filters:
+      - delayed_on: 50ms   # Debounce
+      - delayed_off: 50ms
+    on_press:
+      then:
+        - light.turn_on:
+            id: display_backlight
+            brightness: 100%
+        - lvgl.resume:
+        - globals.set:
+            id: display_on
+            value: 'true'
+        - if:
+            condition:
+              lambda: 'return id(is_muted);'
+            then:
+              # Currently muted - UNMUTE
+              - logger.log: "Unmuting voice assistant"
+              - globals.set:
+                  id: is_muted
+                  value: 'false'
+              - lvgl.label.update:
+                  id: lbl_status
+                  text: "Ready"
+                  text_color: 0xFFFFFF
+              - voice_assistant.start_continuous:
+            else:
+              # Currently unmuted - MUTE
+              - logger.log: "Muting voice assistant"
+              - globals.set:
+                  id: is_muted
+                  value: 'true'
+              - voice_assistant.stop:
+              - lvgl.label.update:
+                  id: lbl_status
+                  text: "Muted"
+                  text_color: 0xFF6600
+  - platform: touchscreen
+    name: Left Touch Button
+    x_min: 0
+    x_max: 180
+    y_min: 0
+    y_max: 360
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(ignore_touch);'
+            then:
+              # First touch after wake - just clear the flag, don't change page
+              - globals.set:
+                  id: ignore_touch
+                  value: 'false'
+            else:
+              # Display was already on - change page
+              - lvgl.page.previous:
+  - platform: touchscreen
+    name: Right Touch Button
+    x_min: 180
+    x_max: 360
+    y_min: 0
+    y_max: 360
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(ignore_touch);'
+            then:
+              # First touch after wake - just clear the flag, don't change page
+              - globals.set:
+                  id: ignore_touch
+                  value: 'false'
+            else:
+              # Display was already on - change page
+              - lvgl.page.next:
+
+# I2C bus - single bus (0x15, 0x20, 0x51 all found on this bus)
+i2c:
+  sda: GPIO11
+  scl: GPIO10
+  scan: true
+
+# PCA9554 I/O expander (for display reset pin)
+pca9554:
+  - id: 'pca9554_device'
+    address: 0x20
+
+# Backlight output
+output:
+  - platform: ledc
+    pin: GPIO5
+    id: backlight
+
+# Backlight light
+light:
+  - platform: monochromatic
+    output: backlight
+    id: display_backlight
+    name: 'Display Backlight'
+    restore_mode: ALWAYS_ON
+
+# QSPI bus for display
+spi:
+  id: display_qspi
+  type: quad
+  clk_pin: GPIO40
+  data_pins: [GPIO46, GPIO45, GPIO42, GPIO41]
+
+# Display configuration - WORKING settings for 1.85C variant
+display:
+  - platform: qspi_dbi
+    model: CUSTOM
+    data_rate: 80MHz
+    id: main_display
+    spi_id: display_qspi
+    color_order: rgb
+    invert_colors: true
+    dimensions:
+      height: 360
+      width: 360
+    cs_pin: GPIO21
+    reset_pin:
+      pca9554: pca9554_device
+      number: 2  # EXIO2 - critical for 1.85C variant!
+    auto_clear_enabled: false
+    update_interval: never
+    # Official Waveshare init sequence for 1.85C
+    init_sequence:
+      - [0xF0, 0x28]
+      - [0xF2, 0x28]
+      - [0x73, 0xF0]
+      - [0x7C, 0xD1]
+      - [0x83, 0xE0]
+      - [0x84, 0x61]
+      - [0xF2, 0x82]
+      - [0xF0, 0x00]
+      - [0xF0, 0x01]
+      - [0xF1, 0x01]
+      - [0xB0, 0x56]
+      - [0xB1, 0x4D]
+      - [0xB2, 0x24]
+      - [0xB4, 0x87]
+      - [0xB5, 0x44]
+      - [0xB6, 0x8B]
+      - [0xB7, 0x40]
+      - [0xB8, 0x86]
+      - [0xBA, 0x00]
+      - [0xBB, 0x08]
+      - [0xBC, 0x08]
+      - [0xBD, 0x00]
+      - [0xC0, 0x80]
+      - [0xC1, 0x10]
+      - [0xC2, 0x37]
+      - [0xC3, 0x80]
+      - [0xC4, 0x10]
+      - [0xC5, 0x37]
+      - [0xC6, 0xA9]
+      - [0xC7, 0x41]
+      - [0xC8, 0x01]
+      - [0xC9, 0xA9]
+      - [0xCA, 0x41]
+      - [0xCB, 0x01]
+      - [0xD0, 0x91]
+      - [0xD1, 0x68]
+      - [0xD2, 0x68]
+      - [0xF5, 0x00, 0xA5]
+      - [0xDD, 0x4F]
+      - [0xDE, 0x4F]
+      - [0xF1, 0x10]
+      - [0xF0, 0x00]
+      - [0xF0, 0x02]
+      # Gamma correction
+      - [0xE0, 0xF0, 0x0A, 0x10, 0x09, 0x09, 0x36, 0x35, 0x33, 0x4A, 0x29, 0x15, 0x15, 0x2E, 0x34]
+      - [0xE1, 0xF0, 0x0A, 0x0F, 0x08, 0x08, 0x05, 0x34, 0x33, 0x4A, 0x39, 0x15, 0x15, 0x2D, 0x33]
+      - [0xF0, 0x10]
+      - [0xF3, 0x10]
+      - [0xE0, 0x07]
+      - [0xE1, 0x00]
+      - [0xE2, 0x00]
+      - [0xE3, 0x00]
+      - [0xE4, 0xE0]
+      - [0xE5, 0x06]
+      - [0xE6, 0x21]
+      - [0xE7, 0x01]
+      - [0xE8, 0x05]
+      - [0xE9, 0x02]
+      - [0xEA, 0xDA]
+      - [0xEB, 0x00]
+      - [0xEC, 0x00]
+      - [0xED, 0x0F]
+      - [0xEE, 0x00]
+      - [0xEF, 0x00]
+      - [0xF8, 0x00]
+      - [0xF9, 0x00]
+      - [0xFA, 0x00]
+      - [0xFB, 0x00]
+      - [0xFC, 0x00]
+      - [0xFD, 0x00]
+      - [0xFE, 0x00]
+      - [0xFF, 0x00]
+      - [0x60, 0x40]
+      - [0x61, 0x04]
+      - [0x62, 0x00]
+      - [0x63, 0x42]
+      - [0x64, 0xD9]
+      - [0x65, 0x00]
+      - [0x66, 0x00]
+      - [0x67, 0x00]
+      - [0x68, 0x00]
+      - [0x69, 0x00]
+      - [0x6A, 0x00]
+      - [0x6B, 0x00]
+      - [0x70, 0x40]
+      - [0x71, 0x03]
+      - [0x72, 0x00]
+      - [0x73, 0x42]
+      - [0x74, 0xD8]
+      - [0x75, 0x00]
+      - [0x76, 0x00]
+      - [0x77, 0x00]
+      - [0x78, 0x00]
+      - [0x79, 0x00]
+      - [0x7A, 0x00]
+      - [0x7B, 0x00]
+      - [0x80, 0x48]
+      - [0x81, 0x00]
+      - [0x82, 0x06]
+      - [0x83, 0x02]
+      - [0x84, 0xD6]
+      - [0x85, 0x04]
+      - [0x86, 0x00]
+      - [0x87, 0x00]
+      - [0x88, 0x48]
+      - [0x89, 0x00]
+      - [0x8A, 0x08]
+      - [0x8B, 0x02]
+      - [0x8C, 0xD8]
+      - [0x8D, 0x04]
+      - [0x8E, 0x00]
+      - [0x8F, 0x00]
+      - [0x90, 0x48]
+      - [0x91, 0x00]
+      - [0x92, 0x0A]
+      - [0x93, 0x02]
+      - [0x94, 0xDA]
+      - [0x95, 0x04]
+      - [0x96, 0x00]
+      - [0x97, 0x00]
+      - [0x98, 0x48]
+      - [0x99, 0x00]
+      - [0x9A, 0x0C]
+      - [0x9B, 0x02]
+      - [0x9C, 0xDC]
+      - [0x9D, 0x04]
+      - [0x9E, 0x00]
+      - [0x9F, 0x00]
+      - [0xA0, 0x48]
+      - [0xA1, 0x00]
+      - [0xA2, 0x05]
+      - [0xA3, 0x02]
+      - [0xA4, 0xD5]
+      - [0xA5, 0x04]
+      - [0xA6, 0x00]
+      - [0xA7, 0x00]
+      - [0xA8, 0x48]
+      - [0xA9, 0x00]
+      - [0xAA, 0x07]
+      - [0xAB, 0x02]
+      - [0xAC, 0xD7]
+      - [0xAD, 0x04]
+      - [0xAE, 0x00]
+      - [0xAF, 0x00]
+      - [0xB0, 0x48]
+      - [0xB1, 0x00]
+      - [0xB2, 0x09]
+      - [0xB3, 0x02]
+      - [0xB4, 0xD9]
+      - [0xB5, 0x04]
+      - [0xB6, 0x00]
+      - [0xB7, 0x00]
+      - [0xB8, 0x48]
+      - [0xB9, 0x00]
+      - [0xBA, 0x0B]
+      - [0xBB, 0x02]
+      - [0xBC, 0xDB]
+      - [0xBD, 0x04]
+      - [0xBE, 0x00]
+      - [0xBF, 0x00]
+      - [0xC0, 0x10]
+      - [0xC1, 0x47]
+      - [0xC2, 0x56]
+      - [0xC3, 0x65]
+      - [0xC4, 0x74]
+      - [0xC5, 0x88]
+      - [0xC6, 0x99]
+      - [0xC7, 0x01]
+      - [0xC8, 0xBB]
+      - [0xC9, 0xAA]
+      - [0xD0, 0x10]
+      - [0xD1, 0x47]
+      - [0xD2, 0x56]
+      - [0xD3, 0x65]
+      - [0xD4, 0x74]
+      - [0xD5, 0x88]
+      - [0xD6, 0x99]
+      - [0xD7, 0x01]
+      - [0xD8, 0xBB]
+      - [0xD9, 0xAA]
+      - [0xF3, 0x01]
+      - [0xF0, 0x00]
+      # Color mode RGB565
+      - [0x3A, 0x55]
+      # MADCTL - RGB order
+      - [0x36, 0x00]
+      # Column address (0-359)
+      - [0x2A, 0x00, 0x00, 0x01, 0x67]
+      # Row address (0-359)
+      - [0x2B, 0x00, 0x00, 0x01, 0x67]
+      # Display inversion ON
+      - [0x21, 0x00]
+      # Sleep out
+      - [0x11, 0x00]
+      - delay 120ms
+      # Display ON
+      - [0x29, 0x00]
+      - delay 20ms
+
+# Touchscreen configuration (CST816 at 0x15)
+touchscreen:
+  platform: cst816
+  id: my_touchscreen
+  address: 0x15
+  interrupt_pin: GPIO4
+  on_touch:
+    then:
+      - light.turn_on: display_backlight
+      - lvgl.resume:
+      - globals.set:
+          id: display_on
+          value: 'true'
+      - if:
+          condition:
+            lambda: 'return !id(is_muted);'
+          then:
+            - delay: 500ms
+            - voice_assistant.start_continuous:
+
+# Custom fonts for large time display
+font:
+  - file: "gfonts://Montserrat"
+    id: montserrat_48
+    size: 48
+
+# LVGL configuration
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - touchscreen_id: my_touchscreen
+  buffer_size: 25%
+  log_level: INFO
+  color_depth: 16
+  bg_color: 0x000033
+  
+  on_idle:
+    timeout: 30s
+    then:
+      - logger.log: 'LVGL is idle - display going to sleep'
+      - globals.set:
+          id: display_on
+          value: 'false'
+      - globals.set:
+          id: ignore_touch
+          value: 'true'
+      # Hide the ring before sleep
+      - lvgl.widget.hide: voice_ring
+      - lvgl.pause:
+      - light.turn_off:
+          id: display_backlight
+          transition_length: 5s
+  
+  style_definitions:
+    - id: style_title
+      text_font: montserrat_28
+      text_color: 0xFFFFFF
+    - id: style_body
+      text_font: montserrat_20
+      text_color: 0x00FF00
+  
+  # Top layer - voice status ring (visible on all pages)
+  top_layer:
+    widgets:
+      # Outer ring indicator for voice assistant state
+      - spinner:
+          id: voice_ring
+          align: CENTER
+          width: 356
+          height: 356
+          arc_color: 0x003300
+          arc_width: 6
+          spin_time: 1500ms
+          arc_length: 60
+          indicator:
+            arc_color: 0x00FF00
+            arc_width: 6
+          hidden: true
+  
+  pages:
+    # Page 1: Home - Time, Weather, Voice Status
+    - id: main_page
+      widgets:
+        # Time (big, top)
+        - label:
+            id: lbl_time
+            align: TOP_MID
+            y: 45
+            text_font: montserrat_48
+            text_color: 0xFFFFFF
+            text: "--:--"
+        
+        # Date (below time)
+        - label:
+            id: lbl_date
+            align: TOP_MID
+            y: 105
+            text_font: montserrat_16
+            text_color: 0xAAAAAA
+            text: "--- -- ---"
+        
+        # Weather temperature
+        - label:
+            id: lbl_weather_temp
+            align: CENTER
+            y: -25
+            text_font: montserrat_28
+            text_color: 0x00BFFF
+            text: "--°C"
+        
+        # Weather condition
+        - label:
+            id: lbl_weather_cond
+            align: CENTER
+            y: 10
+            text_font: montserrat_16
+            text_color: 0x87CEEB
+            text: "Weather loading..."
+        
+        # Voice status
+        - label:
+            id: lbl_status
+            align: CENTER
+            y: 55
+            text_font: montserrat_20
+            text_color: 0x00FF00
+            text: "Ready"
+        
+        # Wake word hint
+        - label:
+            align: BOTTOM_MID
+            y: -45
+            text_font: montserrat_14
+            text_color: 0x666666
+            text: "Say '${wake_word_phrase}'"
+    
+    # Page 2: Device Info
+    - id: info_page
+      widgets:
+        - label:
+            align: TOP_MID
+            y: 50
+            styles: style_title
+            text: "Device Info"
+        
+        # IP Address
+        - label:
+            id: lbl_ip
+            align: CENTER
+            y: -40
+            text_font: montserrat_16
+            text_color: 0x00FF00
+            text: "IP: Connecting..."
+        
+        # WiFi Signal
+        - label:
+            id: lbl_wifi_signal
+            align: CENTER
+            y: 0
+            text_font: montserrat_16
+            text_color: 0x00FF00
+            text: "WiFi: --"
+        
+        # Uptime
+        - label:
+            id: lbl_uptime
+            align: CENTER
+            y: 40
+            text_font: montserrat_16
+            text_color: 0x00FFFF
+            text: "Uptime: --"
+        
+        - label:
+            align: BOTTOM_MID
+            y: -45
+            text_font: montserrat_14
+            text_color: 0x666666
+            text: "Swipe for more"
+    
+    # Media Player page - COMMENTED OUT until ESP-IDF support is added
+    # Uncomment this page when media_player component works with ESP-IDF
+    # - id: media_page
+    #   widgets:
+    #     - label:
+    #         align: TOP_MID
+    #         y: 50
+    #         styles: style_title
+    #         text: "Media Player"
+    #     - label:
+    #         align: CENTER
+    #         text_font: montserrat_16
+    #         text_color: 0xFF6600
+    #         text: "Not available\nwith ESP-IDF"
+
+# Sensors
+sensor:
+  - platform: wifi_signal
+    name: 'WiFi Signal'
+    id: wifi_signal_sensor
+    update_interval: 60s
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_wifi_signal
+            text: !lambda 'return ("WiFi: " + std::to_string((int)x) + " dBm").c_str();'
+  - platform: uptime
+    name: 'Uptime'
+    id: uptime_sensor
+    update_interval: 60s
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_uptime
+            text: !lambda |-
+              int seconds = (int)x;
+              int hours = seconds / 3600;
+              int minutes = (seconds % 3600) / 60;
+              return ("Uptime: " + std::to_string(hours) + "h " + std::to_string(minutes) + "m").c_str();
+
+# Text sensors
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: 'IP Address'
+      id: wifi_ip
+      on_value:
+        then:
+          - lvgl.label.update:
+              id: lbl_ip
+              text_color: 0x00FF00
+              text: !lambda 'return ("IP: " + x).c_str();'
+    ssid:
+      name: 'SSID'
+    mac_address:
+      name: 'MAC Address'
+  - platform: template
+    name: 'Display Text'
+    id: display_text
+    update_interval: never
+
+# Switch for mute control from Home Assistant
+switch:
+  - platform: template
+    name: 'Mute Voice Assistant'
+    id: mute_switch
+    icon: "mdi:microphone-off"
+    lambda: 'return id(is_muted);'
+    turn_on_action:
+      - logger.log: "Muting via HA switch"
+      - globals.set:
+          id: is_muted
+          value: 'true'
+      - voice_assistant.stop:
+      - lvgl.label.update:
+          id: lbl_status
+          text: "Muted"
+          text_color: 0xFF6600
+    turn_off_action:
+      - logger.log: "Unmuting via HA switch"
+      - globals.set:
+          id: is_muted
+          value: 'false'
+      - lvgl.label.update:
+          id: lbl_status
+          text: "Ready"
+          text_color: 0xFFFFFF
+      - voice_assistant.start_continuous:
