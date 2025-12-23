@@ -2,7 +2,7 @@
 
 A complete ESPHome configuration for the **Waveshare ESP32-S3-Touch-LCD-1.85C** - a round 360×360 touchscreen display with voice assistant capabilities.
 
-| Home Screen | Listening | Device Info |
+| Home Screen | Device Info | Listening |
 |:-----------:|:---------:|:-----------:|
 | ![Home](media/PXL_20251223_101139206.MP.jpg) | ![Listening](media/PXL_20251223_101147435.MP.jpg) | ![Info](media/PXL_20251223_101156063.MP.jpg) |
 
