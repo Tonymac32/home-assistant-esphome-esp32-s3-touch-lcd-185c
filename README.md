@@ -2,11 +2,13 @@
 
 A complete ESPHome configuration for the **Waveshare ESP32-S3-Touch-LCD-1.85C** - a round 360×360 touchscreen display with voice assistant capabilities.
 
-| Home Screen | Device Info | Listening |
-|:-----------:|:---------:|:-----------:|
-| ![Home](media/PXL_20251223_101139206.MP.jpg) | ![Listening](media/PXL_20251223_101147435.MP.jpg) | ![Info](media/PXL_20251223_101156063.MP.jpg) |
+| Home Screen | Settings | Device Info |
+|:-----------:|:--------:|:-----------:|
+| ![Home](media/PXL_20251223_101139206.MP.jpg) | ![Settings](media/PXL_20251227_114307634.jpg) | ![Info](media/PXL_20251223_101147435.MP.jpg) |
 
-📺 **[Watch Demo Video](media/PXL_20251223_101239131.mp4)**
+| Home (alt) | Listening | Listening (alt) |
+|:----------:|:---------:|:----------:|
+| ![Home](media/PXL_20251227_114347207.jpg) | ![Listening](media/PXL_20251223_101156063.MP.jpg) | ![Info](media/PXL_20251227_114447949.MP.jpg) |
 
 ## 🛒 Hardware Used
 
@@ -29,6 +31,8 @@ A complete ESPHome configuration for the **Waveshare ESP32-S3-Touch-LCD-1.85C** 
 | **Speaker Output** | ✅ Working | TTS responses play through speaker |
 | **Microphone Input** | ✅ Working | Captures voice commands |
 | **Auto Sleep/Wake** | ✅ Working | Display dims after 30s, touch/voice to wake |
+| **Clock Mode (Screensaver)** | ✅ Working | Always-on clock display when idle - use as a desk clock! |
+| **Settings Page** | ✅ Working | On-device settings with touch toggles |
 | **WiFi Connected** | ✅ Working | Full Home Assistant integration |
 | **OTA Updates** | ✅ Working | Update firmware over-the-air |
 | **Media Player** | ❌ Not Supported | Requires Arduino framework (ESP-IDF needed for display) |
@@ -172,15 +176,16 @@ mode: single
 
 | Control | Action |
 |---------|--------|
-| **Press button** | Toggle mute (mic/speaker on/off) |
+| **Press side button** | Toggle mute (mic/speaker on/off) |
 | **"Hey Jarvis"** | Activate voice assistant (wake word) |
-| **Touch screen** | Wake display from sleep |
-| **Swipe left/right** | Change pages |
-| **30 seconds idle** | Display auto-sleeps |
+| **Touch screen** | Wake display from sleep/screensaver |
+| **Tap left/right edge** | Change pages |
+| **Tap Clock Mode switch** | Toggle always-on clock (Settings page) |
+| **30 seconds idle** | Display sleeps or shows clock (if Clock Mode enabled) |
 
 ## 🖥️ Display Pages
 
-*Swipe left or right to change pages*
+*Swipe left or right to change pages (tap edges of screen)*
 
 ### Page 1: Home
 - ⏰ Time (large, synced from HA)
@@ -188,11 +193,24 @@ mode: single
 - 🌡️ Weather temperature & condition
 - 🎤 Voice status (Ready/Listening/Muted/Error)
 - 🔄 Spinning ring indicator when listening/processing
+- 💬 Wake word hint at bottom
 
-### Page 2: Device Info
+### Page 2: Settings
+- 🕐 **Clock Mode** toggle - Enable to show time always when idle
+- When enabled, display shows a dimmed clock instead of turning off
+
+### Page 3: Device Info
 - 🌐 IP Address
 - 📶 WiFi signal strength (dBm)
 - ⏱️ Device uptime
+
+### Clock Mode (Screensaver)
+When **Clock Mode** is enabled in Settings:
+- After 30 seconds idle, display dims to 15% brightness
+- Shows large time and date on black background
+- Wake word hint remains visible
+- Touch anywhere to return to normal mode
+- Perfect for use as a bedside or desk clock!
 
 ## ⚙️ Hardware Specifications
 

@@ -11,6 +11,18 @@ esphome:
     priority: -100
     then:
       - delay: 5s
+      # Initialize clock mode switch from restored global value
+      - if:
+          condition:
+            lambda: 'return id(clock_mode);'
+          then:
+            - lvgl.widget.update:
+                id: clock_mode_switch
+                state:
+                  checked: true
+            - logger.log: "Clock mode restored: ON"
+          else:
+            - logger.log: "Clock mode restored: OFF"
       - if:
           condition:
             lambda: 'return !id(is_muted);'
@@ -29,6 +41,14 @@ globals:
     restore_value: no
     initial_value: 'true'
   - id: ignore_touch
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+  - id: clock_mode
+    type: bool
+    restore_value: yes  # Persist across reboots
+    initial_value: 'false'
+  - id: in_screensaver
     type: bool
     restore_value: no
     initial_value: 'false'
@@ -87,6 +107,17 @@ time:
                 return time.strftime("%H:%M");
           - lvgl.label.update:
               id: lbl_date
+              text: !lambda |-
+                auto time = id(ha_time).now();
+                return time.strftime("%a %d %b");
+          # Also update screensaver time
+          - lvgl.label.update:
+              id: lbl_screensaver_time
+              text: !lambda |-
+                auto time = id(ha_time).now();
+                return time.strftime("%H:%M");
+          - lvgl.label.update:
+              id: lbl_screensaver_date
               text: !lambda |-
                 auto time = id(ha_time).now();
                 return time.strftime("%a %d %b");
@@ -306,44 +337,29 @@ binary_sensor:
                   id: lbl_status
                   text: "Muted"
                   text_color: 0xFF6600
+  # Edge swipe zones for page navigation (narrow strips on left/right edges)
   - platform: touchscreen
-    name: Left Touch Button
+    touchscreen_id: my_touchscreen
+    id: swipe_left
+    internal: true
     x_min: 0
-    x_max: 180
-    y_min: 0
-    y_max: 360
+    x_max: 60
+    y_min: 100
+    y_max: 260
     on_press:
       then:
-        - if:
-            condition:
-              lambda: 'return id(ignore_touch);'
-            then:
-              # First touch after wake - just clear the flag, don't change page
-              - globals.set:
-                  id: ignore_touch
-                  value: 'false'
-            else:
-              # Display was already on - change page
-              - lvgl.page.previous:
+        - lvgl.page.previous:
   - platform: touchscreen
-    name: Right Touch Button
-    x_min: 180
+    touchscreen_id: my_touchscreen
+    id: swipe_right
+    internal: true
+    x_min: 300
     x_max: 360
-    y_min: 0
-    y_max: 360
+    y_min: 100
+    y_max: 260
     on_press:
       then:
-        - if:
-            condition:
-              lambda: 'return id(ignore_touch);'
-            then:
-              # First touch after wake - just clear the flag, don't change page
-              - globals.set:
-                  id: ignore_touch
-                  value: 'false'
-            else:
-              # Display was already on - change page
-              - lvgl.page.next:
+        - lvgl.page.next:
 
 # I2C bus - single bus (0x15, 0x20, 0x51 all found on this bus)
 i2c:
@@ -604,11 +620,26 @@ touchscreen:
   interrupt_pin: GPIO4
   on_touch:
     then:
-      - light.turn_on: display_backlight
+      - light.turn_on:
+          id: display_backlight
+          brightness: 100%
       - lvgl.resume:
       - globals.set:
           id: display_on
           value: 'true'
+      # Clear ignore_touch flag on any touch
+      - globals.set:
+          id: ignore_touch
+          value: 'false'
+      # If in screensaver, go back to main page
+      - if:
+          condition:
+            lambda: 'return id(in_screensaver);'
+          then:
+            - globals.set:
+                id: in_screensaver
+                value: 'false'
+            - lvgl.page.show: main_page
       - if:
           condition:
             lambda: 'return !id(is_muted);'
@@ -621,6 +652,12 @@ font:
   - file: "gfonts://Montserrat"
     id: montserrat_48
     size: 48
+  - file: "gfonts://Montserrat"
+    id: montserrat_58
+    size: 58
+  - file: "gfonts://Montserrat"
+    id: montserrat_24
+    size: 24
 
 # LVGL configuration
 lvgl:
@@ -636,7 +673,7 @@ lvgl:
   on_idle:
     timeout: 30s
     then:
-      - logger.log: 'LVGL is idle - display going to sleep'
+      - logger.log: 'LVGL is idle'
       - globals.set:
           id: display_on
           value: 'false'
@@ -645,10 +682,27 @@ lvgl:
           value: 'true'
       # Hide the ring before sleep
       - lvgl.widget.hide: voice_ring
-      - lvgl.pause:
-      - light.turn_off:
-          id: display_backlight
-          transition_length: 5s
+      - if:
+          condition:
+            lambda: 'return id(clock_mode);'
+          then:
+            # Clock mode enabled - show screensaver
+            - logger.log: 'Entering clock screensaver mode'
+            - globals.set:
+                id: in_screensaver
+                value: 'true'
+            - lvgl.page.show: screensaver_page
+            - light.turn_on:
+                id: display_backlight
+                brightness: 15%
+                transition_length: 2s
+          else:
+            # Normal mode - turn off display
+            - logger.log: 'Display going to sleep'
+            - lvgl.pause:
+            - light.turn_off:
+                id: display_backlight
+                transition_length: 5s
   
   style_definitions:
     - id: style_title
@@ -733,7 +787,58 @@ lvgl:
             text_color: 0x666666
             text: "Say '${wake_word_phrase}'"
     
-    # Page 2: Device Info
+    # Page 2: Settings
+    - id: settings_page
+      widgets:
+        - label:
+            align: TOP_MID
+            y: 50
+            styles: style_title
+            text: "Settings"
+        
+        # Clock Mode toggle
+        - label:
+            align: CENTER
+            x: -60
+            y: -20
+            text_font: montserrat_20
+            text_color: 0xFFFFFF
+            text: "Clock Mode"
+        
+        - switch:
+            id: clock_mode_switch
+            align: CENTER
+            x: 80
+            y: -20
+            width: 60
+            height: 32
+            bg_color: 0x333333
+            indicator:
+              bg_color: 0x00FF00
+            on_click:
+              then:
+                - lambda: |-
+                    bool new_state = lv_obj_has_state(id(clock_mode_switch), LV_STATE_CHECKED);
+                    id(clock_mode) = new_state;
+                    ESP_LOGI("settings", "Clock mode set to: %s", new_state ? "ON" : "OFF");
+        
+        # Description
+        - label:
+            align: CENTER
+            y: 30
+            text_font: montserrat_14
+            text_color: 0x888888
+            text: "Show time when idle"
+        
+        # Hint at bottom
+        - label:
+            align: BOTTOM_MID
+            y: -45
+            text_font: montserrat_14
+            text_color: 0x666666
+            text: "Swipe for more"
+    
+    # Page 3: Device Info
     - id: info_page
       widgets:
         - label:
@@ -790,6 +895,35 @@ lvgl:
     #         text_font: montserrat_16
     #         text_color: 0xFF6600
     #         text: "Not available\nwith ESP-IDF"
+    
+    # Screensaver page - Clock only (skip from normal navigation)
+    - id: screensaver_page
+      skip: true
+      bg_color: 0x000000
+      widgets:
+        # Large centered time - bright white text (20% larger)
+        - label:
+            id: lbl_screensaver_time
+            align: CENTER
+            y: -25
+            text_font: montserrat_58
+            text_color: 0xFFFFFF
+            text: "--:--"
+        # Date below - brighter and larger
+        - label:
+            id: lbl_screensaver_date
+            align: CENTER
+            y: 45
+            text_font: montserrat_24
+            text_color: 0xDDDDDD
+            text: "--- -- ---"
+        # Wake word hint
+        - label:
+            align: BOTTOM_MID
+            y: -50
+            text_font: montserrat_14
+            text_color: 0xFFFFFF
+            text: "Say '${wake_word_phrase}'"
 
 # Sensors
 sensor:
@@ -864,3 +998,27 @@ switch:
           text: "Ready"
           text_color: 0xFFFFFF
       - voice_assistant.start_continuous:
+  
+  - platform: template
+    name: 'Clock Mode'
+    id: clock_mode_ha_switch
+    icon: "mdi:clock-outline"
+    lambda: 'return id(clock_mode);'
+    turn_on_action:
+      - logger.log: "Enabling clock mode via HA"
+      - globals.set:
+          id: clock_mode
+          value: 'true'
+      - lvgl.widget.update:
+          id: clock_mode_switch
+          state:
+            checked: true
+    turn_off_action:
+      - logger.log: "Disabling clock mode via HA"
+      - globals.set:
+          id: clock_mode
+          value: 'false'
+      - lvgl.widget.update:
+          id: clock_mode_switch
+          state:
+            checked: false
