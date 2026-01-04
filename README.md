@@ -32,6 +32,7 @@ A complete ESPHome configuration for the **Waveshare ESP32-S3-Touch-LCD-1.85C** 
 | **Microphone Input** | ✅ Working | Captures voice commands |
 | **Auto Sleep/Wake** | ✅ Working | Display dims after 30s, touch/voice to wake |
 | **Clock Mode (Screensaver)** | ✅ Working | Always-on clock display when idle - use as a desk clock! |
+| **Flip Display (180°)** | ✅ Working | Edit config to mount with USB up (see below) |
 | **Settings Page** | ✅ Working | On-device settings with touch toggles |
 | **WiFi Connected** | ✅ Working | Full Home Assistant integration |
 | **OTA Updates** | ✅ Working | Update firmware over-the-air |
@@ -197,7 +198,8 @@ mode: single
 
 ### Page 2: Settings
 - 🕐 **Clock Mode** toggle - Enable to show time always when idle
-- When enabled, display shows a dimmed clock instead of turning off
+- Setting persists across reboots
+- Also controllable from Home Assistant
 
 ### Page 3: Device Info
 - 🌐 IP Address
@@ -211,6 +213,28 @@ When **Clock Mode** is enabled in Settings:
 - Wake word hint remains visible
 - Touch anywhere to return to normal mode
 - Perfect for use as a bedside or desk clock!
+
+### Flip Display (180°)
+
+To mount with USB cable pointing **up**, find line ~600 in the YAML:
+
+```yaml
+# MADCTL - Display orientation
+# Change 0x00 to 0xC0 to flip display 180° (for USB cable pointing up)
+- [0x36, 0x00]
+```
+
+Change to `0xC0` and recompile:
+```yaml
+- [0x36, 0xC0]
+```
+
+| Value | USB Position |
+|-------|--------------|
+| `0x00` | Down (default) |
+| `0xC0` | Up (flipped) |
+
+> **Note**: Runtime flip not possible - the QSPI display driver doesn't allow sending commands after initialization.
 
 ## ⚙️ Hardware Specifications
 

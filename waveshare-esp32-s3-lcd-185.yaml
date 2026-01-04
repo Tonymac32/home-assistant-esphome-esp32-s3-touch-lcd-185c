@@ -1,8 +1,11 @@
 # Waveshare ESP32-S3-Touch-LCD-1.85C - Full Configuration
 # With Voice Assistant, Touch, LVGL UI, and Wake Word
 
+# FLIP DISPLAY search for FLIP DISPLAY, and change 3 values for 180 degree flip
+
 substitutions:
   wake_word_phrase: !secret wake_word_phrase
+  version: "1.1.0"
 
 esphome:
   name: esp32-s3-touch-lcd-185
@@ -399,6 +402,7 @@ display:
     model: CUSTOM
     data_rate: 80MHz
     id: main_display
+    rotation: 180°    # FLIP DISPLAY change to 180° to flip display
     spi_id: display_qspi
     color_order: rgb
     invert_colors: true
@@ -597,7 +601,7 @@ display:
       - [0xF0, 0x00]
       # Color mode RGB565
       - [0x3A, 0x55]
-      # MADCTL - RGB order
+      # MADCTL - Display orientation
       - [0x36, 0x00]
       # Column address (0-359)
       - [0x2A, 0x00, 0x00, 0x01, 0x67]
@@ -618,6 +622,9 @@ touchscreen:
   id: my_touchscreen
   address: 0x15
   interrupt_pin: GPIO4
+  transform:
+    mirror_x: true #FLIP DISPLAY change to true to flip display
+    mirror_y: true #FLIP DISPLAY change to true to flip display
   on_touch:
     then:
       - light.turn_on:
@@ -847,11 +854,19 @@ lvgl:
             styles: style_title
             text: "Device Info"
         
+        # Version
+        - label:
+            align: CENTER
+            y: -60
+            text_font: montserrat_16
+            text_color: 0xAAAAAA
+            text: "V${version}"
+        
         # IP Address
         - label:
             id: lbl_ip
             align: CENTER
-            y: -40
+            y: -30
             text_font: montserrat_16
             text_color: 0x00FF00
             text: "IP: Connecting..."
@@ -860,7 +875,7 @@ lvgl:
         - label:
             id: lbl_wifi_signal
             align: CENTER
-            y: 0
+            y: 5
             text_font: montserrat_16
             text_color: 0x00FF00
             text: "WiFi: --"
@@ -970,6 +985,19 @@ text_sensor:
     name: 'Display Text'
     id: display_text
     update_interval: never
+  - platform: template
+    name: 'Firmware Version'
+    id: firmware_version
+    icon: "mdi:tag"
+    lambda: 'return {"${version}"};'
+    update_interval: 3600s
+
+# Button for restart
+button:
+  - platform: restart
+    name: "Restart"
+    id: restart_button
+    icon: "mdi:restart"
 
 # Switch for mute control from Home Assistant
 switch:
@@ -1022,3 +1050,5 @@ switch:
           id: clock_mode_switch
           state:
             checked: false
+
+
